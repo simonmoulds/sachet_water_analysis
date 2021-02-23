@@ -728,6 +728,16 @@ distGeo216 = st_read(
 distGeo216 %<>% st_transform(crs=4326)
 saveRDS(distGeo216, "data/Map_of_Districts_216.rds")
 
+## test = st_read(dsn="data-raw/Districts_170", layer="Ghana_Districts_170")
+## st_write(test, dsn="data/Ghana_Districts_170.gpkg")
+## test2 = st_read(dsn="data-raw", layer="geo2_gh2010")
+## st_write(test, dsn="data/geo2_gh2010.gpkg")
+
+## Copy this file to GPKG for use in Python script (for some reason it
+## doesn't like the geo2_gh2010 file)
+distGeo170 = st_read(dsn="data-raw/Districts_170", layer="Ghana_Districts_170")
+st_write(distGeo170, dsn="data/Ghana_Districts_170.gpkg", append=FALSE)
+
 distGeo170 = st_read(
     dsn="data-raw",
     layer="geo2_gh2010"

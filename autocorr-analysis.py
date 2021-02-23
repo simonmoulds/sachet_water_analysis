@@ -13,9 +13,12 @@ import geopandas as gpd
 # polygon file here, and merge with the data from R using the common
 # 'dist' column
 
-distGeo170 = gpd.read_file("../data-raw/Districts_170/Ghana_Districts_170.shp")
+# distGeo170 = gpd.read_file("data-raw/Districts_170/Ghana_Districts_170.shp")
+distGeo170 = gpd.read_file("data/Ghana_Districts_170.gpkg")
 distGeo170['dist'] = np.array(distGeo170['DIST_CODE'].values).astype(int)
-x = pd.read_csv('../data/data_fromR.csv')
+# distGeo170 = gpd.read_file("data/geo2_gh2010.gpkg")
+# distGeo170['dist'] = np.array(distGeo170['DIST2010'].values).astype(int)
+x = pd.read_csv('data/data_fromR.csv')
 distGeo170 = pd.merge(distGeo170, x, left_on='dist', right_on='dist', how='outer')
 
 w = weights.Queen.from_dataframe(distGeo170)
@@ -28,7 +31,7 @@ for tempYear in [2010, 2013, 2017]:
     distGeo170['q_' + str(tempYear)] = moran_loc_bv.q
 
 dist_geo_170_lisa = distGeo170.copy()
-dist_geo_170_lisa.to_file('../data/dist_geo_170_updated.gpkg', driver='GPKG', index=True)
+dist_geo_170_lisa.to_file('data/dist_geo_170_updated.gpkg', driver='GPKG', index=True)
 
 ## Spatial autocorrelation of sachet drinking consuming
 ## regions in 2010, 2013 and 2017
@@ -55,7 +58,7 @@ moran_df = pd.DataFrame(
 ) 
 
 # Write output to file
-moran_df.to_csv("../data/moran_I_data.csv", index=False)
+moran_df.to_csv("data/moran_I_data.csv", index=False)
 
 ## Bivariate spatial autocorrelation between sachet consumption and
 ## household density in 2010, 2013 and 2017
@@ -83,5 +86,5 @@ moranBV_df = pd.DataFrame(
 ) 
 
 # Write output to file
-moranBV_df.to_csv("../data/moranBV_I_data.csv", index=False)
+moranBV_df.to_csv("data/moranBV_I_data.csv", index=False)
     
