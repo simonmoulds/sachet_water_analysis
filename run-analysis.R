@@ -3,9 +3,12 @@
 
 library(foreign)
 library(rgdal)
+library(rgeos)
 library(tidyverse)
 library(magrittr)
 library(sf)
+library(sp)
+library(spdep)
 library(reticulate)
 library(rmcorr)
 
@@ -24,6 +27,47 @@ outdir = "figs"
 
 ## ####################################################### ##
 ## ####################################################### ##
+
+## From Humanitarian Data Exchange:
+adm1_2021 = st_read(
+    "data-raw/gha_admbnda_gss_20210308_SHP/gha_admbnda_adm1_gss_20210308.shp"
+)
+
+adm1_2021$ADM1_NAME = c("Brong Ahafo","Ashanti","Brong Ahafo","Brong Ahafo","Central","Eastern","Greater Accra","Northern","Northern","Volta","Northern","Upper East","Upper West","Volta","Western","Western")
+
+adm1_2010 =
+    adm1_2021 %>%
+    group_by(ADM1_NAME) %>%
+    summarise(m=mean(Shape_Leng)) %>%
+    st_cast()
+
+adm2_2021 = st_read(
+    "data-raw/gha_admbnda_gss_20210308_SHP/gha_admbnda_adm2_gss_20210308.shp"
+)
+
+## Regional capitals:
+## ===========================
+
+## region        capital           x         y
+## ==================================================
+## Ashanti       Kumasi           -1.621626  6.696135
+## Brong Ahafo   Sunyani          -2.330503  7.337625
+## Central       Cape Coast       -1.237695  5.105111
+## Eastern       Koforidua        -0.2597614 6.090775
+## Greater Accra Accra            -0.2064601 5.538952
+## Northern      Tamale           -0.8427207 9.40205
+## Upper East    Bolgatanga       -0.8530315 10.78172
+## Upper West    Wa               -2.498401  10.06015
+## Volta         Ho                0.4698795 6.608467
+## Western       Sekondi-Takoradi -1.709742  4.933333
+
+ghana_cities = data.frame(
+    region=c("Ashanti","Brong Ahafo","Central","Eastern","Greater Accra","Northern","Upper East","Upper West","Volta","Western"),
+    capital=c("Kumasi","Sunyani","Cape Coast","Koforidua","Accra","Tamale","Bolgatanga","Wa","Ho","Sekondi-Takoradi"),
+    x=c(-1.621626, -2.330503, -1.237695, -0.2597614, -0.2064601, -0.8427207, -0.8530315, -2.498401, 0.4698795, -1.709742), 
+    y=c(6.696135, 7.337625, 5.105111, 6.090775, 5.538952, 9.40205, 10.78172, 10.06015, 6.608467, 4.933333)
+)
+ghana_cities %<>% st_as_sf(coords=c("x","y"), crs=4326) %>% cbind(st_coordinates(.))
 
 rgn_codes = readRDS(
     "data/map_rgn_name_to_code.rds"
@@ -200,18 +244,27 @@ draw_key_polygon3 <- function(data, params, size) {
     ))
 }
 
-# Register new key drawing function, 
-# the effect is global & persistent throughout the R session
+## Register new key drawing function, 
+## the effect is global & persistent throughout the R session
 GeomArea$draw_key = draw_key_polygon3
 p = ds_ghana %>%
     ggplot(aes(x=YEAR, y=WH_sum, fill=WATER_DRINKING_7)) +
     geom_area(position='stack', colour='black', size=0.1) +
     scale_fill_brewer(palette="Set1") + 
     ylab(expression(paste("No. of households (\uD7",10^6, ")"))) + 
-    xlab("Year") + 
-    labs(caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source") + 
+    scale_x_continuous(
+        name="Year",
+        minor_breaks=c(2010:2017),
+        breaks=c(2010,2013,2017),
+        labels=c("2010","2013","2017")
+    ) + 
+    labs(
+        fill="Household primary drinking water source",
+        caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source"
+    ) + 
     theme(
-        legend.title=element_blank(),
+        legend.title=element_text(size=6, face="italic"),
+        ## legend.title=element_blank(),
         legend.position="bottom",
         legend.text=element_text(size=6),
         axis.text=element_text(size=6),
@@ -220,10 +273,10 @@ p = ds_ghana %>%
         legend.key=element_rect(fill="white"),
         plot.caption=element_text(size=6)
     ) +
-    guides(fill=guide_legend(ncol=2))
+    guides(fill=guide_legend(ncol=2, title.position="top"))
 
 cairo_pdf(
-    file.path(outdir, "figure2.pdf"),
+    file.path(outdir, "S1_Fig.pdf"),
     width=5, height=4
 )
 print(p)
@@ -266,23 +319,44 @@ p = ds_combined %>%
     scale_fill_brewer(palette="Set1") + 
     facet_wrap(cat ~ ., ncol=2) + 
     ylab(expression(paste("No. of households (\uD7",10^6, ")"))) + 
-    xlab("Year") + 
-    labs(caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source") + 
+    scale_x_continuous(
+        name="Year",
+        minor_breaks=c(2010:2017),
+        breaks=c(2010,2013,2017),
+        labels=c("2010","2013","2017")
+    ) +
+    labs(
+        fill="Household primary drinking water source",
+        caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source"
+    ) + 
     theme(
-        legend.title=element_blank(),
+        legend.title=element_text(size=6, face="italic"),
+        ## legend.title=element_blank(),
         legend.position="bottom",
         legend.text=element_text(size=6),
         axis.text=element_text(size=6),
-        strip.text=element_text(size=8, margin=margin(t=3, b=2)),
         axis.title=element_text(size=8),
         legend.key.size=unit(0.3,"cm"),
         legend.key=element_rect(fill="white"),
         plot.caption=element_text(size=6)
     ) +
-    guides(fill=guide_legend(ncol=2))
+    guides(fill=guide_legend(ncol=2, title.position="top"))    
+    ## labs(caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source") + 
+    ## theme(
+    ##     legend.title=element_blank(),
+    ##     legend.position="bottom",
+    ##     legend.text=element_text(size=6),
+    ##     axis.text=element_text(size=6),
+    ##     strip.text=element_text(size=8, margin=margin(t=3, b=2)),
+    ##     axis.title=element_text(size=8),
+    ##     legend.key.size=unit(0.3,"cm"),
+    ##     legend.key=element_rect(fill="white"),
+    ##     plot.caption=element_text(size=6)
+    ## ) +
+    ## guides(fill=guide_legend(ncol=2))
 
 cairo_pdf(
-    file.path(outdir, "figure3.pdf"),
+    file.path(outdir, "S2_Fig.pdf"),
     width=5, height=4
 )
 print(p)
@@ -298,7 +372,7 @@ ds_accra =
     arrange(WATER_DRINKING_7) %>%
     mutate(WATER_DRINKING_7=as.factor(WATER_DRINKING_7)) %>%
     mutate(WH_sum = WH_sum / 1e6) %>%
-    mutate(cat="Accra")
+    mutate(cat="Greater Accra")
 
 ds_accra_total = make_summary(ds_accra)
 
@@ -307,10 +381,19 @@ p = ds_accra %>%
     geom_area(position='stack', colour='black', size=0.1) +
     scale_fill_brewer(palette="Set1") + 
     ylab(expression(paste("No. of households (\uD7",10^6, ")"))) + 
-    xlab("Year") + 
-    labs(caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source") + 
+    scale_x_continuous(
+        name="Year",
+        minor_breaks=c(2010:2017),
+        breaks=c(2010,2013,2017),
+        labels=c("2010","2013","2017")
+    ) + 
+    labs(
+        fill="Household primary drinking water source",
+        caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source"
+    ) + 
     theme(
-        legend.title=element_blank(),
+        legend.title=element_text(size=6, face="italic"),
+        ## legend.title=element_blank(),
         legend.position="bottom",
         legend.text=element_text(size=6),
         axis.text=element_text(size=6),
@@ -319,11 +402,95 @@ p = ds_accra %>%
         legend.key=element_rect(fill="white"),
         plot.caption=element_text(size=6)
     ) +
-    guides(fill=guide_legend(ncol=2))
+    guides(fill=guide_legend(ncol=2, title.position="top"))
+    ## labs(caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source") + 
+    ## theme(
+    ##     legend.title=element_blank(),
+    ##     legend.position="bottom",
+    ##     legend.text=element_text(size=6),
+    ##     axis.text=element_text(size=6),
+    ##     axis.title=element_text(size=8),
+    ##     legend.key.size=unit(0.3,"cm"),
+    ##     legend.key=element_rect(fill="white"),
+    ##     plot.caption=element_text(size=6)
+    ## ) +
+    ## guides(fill=guide_legend(ncol=2))
 
 cairo_pdf(
-    file.path(outdir, "figure4.pdf"),
+    file.path(outdir, "S3_Fig.pdf"),
     width=5, height=4
+)
+print(p)
+dev.off()
+
+## An alternative to Figs 2-4
+
+## n2017 = ds_ghana %>% ungroup %>% filter(YEAR==2017) %>% dplyr::select(WH_sum) %>% sum
+## ds_ghana$WH_sum = (ds_ghana$WH_sum / n2017) * 100
+## ds_ghana %<>% mutate(cat="Ghana")
+
+## n2017 = ds_urban %>% ungroup %>% filter(YEAR==2017) %>% dplyr::select(WH_sum) %>% sum
+## ds_urban$WH_sum = (ds_urban$WH_sum / n2017) * 100
+## ds_urban %<>% mutate(cat="Urban")
+
+## n2017 = ds_rural %>% ungroup %>% filter(YEAR==2017) %>% dplyr::select(WH_sum) %>% sum
+## ds_rural$WH_sum = (ds_rural$WH_sum / n2017) * 100
+## ds_rural %<>% mutate(cat="Rural")
+
+## n2017 = ds_accra %>% ungroup %>% filter(YEAR==2017) %>% dplyr::select(WH_sum) %>% sum
+## ds_accra$WH_sum = (ds_accra$WH_sum / n2017) * 100
+## ds_accra %<>% mutate(cat="Greater Accra")
+
+ds_combined = do.call("rbind", list(ds_ghana, ds_urban, ds_rural, ds_accra))
+ds_combined$cat %<>% factor(levels=c("Ghana", "Urban", "Rural", "Greater Accra"))
+ds_combined_tot =
+    ds_combined %>%
+    ungroup() %>%
+    dplyr::select(YEAR, cat, WH_sum) %>%
+    group_by(YEAR, cat) %>%
+    summarise(WH_year_sum=sum(WH_sum))
+
+ds_combined =
+    ds_combined %>%
+    left_join(ds_combined_tot) %>%
+    mutate(WH_frac=WH_sum/WH_year_sum*100)
+
+p = ds_combined %>% 
+    ggplot(aes(x=YEAR, y=WH_frac, fill=WATER_DRINKING_7)) +
+    ## ggplot(aes(x=YEAR, y=WH_sum, fill=WATER_DRINKING_7)) +
+    geom_area(position='stack', colour='black', size=0.1) +
+    scale_fill_brewer(palette="Set1") + 
+    facet_wrap(cat ~ ., ncol=2) + 
+    ylab(expression(paste("Percentage of households (%)"))) + 
+    ## ylab(expression(paste("Percentage of households in 2017 (%)"))) + 
+    scale_x_continuous(
+        name="Year",
+        minor_breaks=c(2010:2017),
+        breaks=c(2010,2013,2017),
+        labels=c("2010","2013","2017")
+    ) + 
+    ## labs(caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source") + 
+    labs(
+        fill="Household primary drinking water source",
+        caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source"
+    ) + 
+    theme(
+        legend.title=element_text(size=6, face="italic"),
+        ## legend.title=element_blank(),
+        legend.position="bottom",
+        legend.text=element_text(size=6),
+        axis.text=element_text(size=6),
+        strip.text=element_text(size=8, margin=margin(t=3, b=2)),
+        axis.title=element_text(size=8),
+        legend.key.size=unit(0.3,"cm"),
+        legend.key=element_rect(fill="white"),
+        plot.caption=element_text(size=6)
+    ) +
+    guides(fill=guide_legend(title.position="top", ncol=2))
+
+cairo_pdf(
+    file.path(outdir, "Fig2.pdf"),
+    width=5, height=5
 )
 print(p)
 dev.off()
@@ -483,11 +650,21 @@ p = ds_combined %>%
     geom_area(position='stack', colour='black', size=0.1) +
     scale_fill_brewer(palette="Set1") + 
     facet_wrap(cat ~ ., ncol=2) + 
-    ylab(expression(paste("Fraction of households consuming sachet water (%)"))) + 
-    xlab("Year") + 
+    ylab(expression(paste("Percentage of households consuming sachet water (%)"))) + 
+    scale_x_continuous(
+        name="Year",
+        minor_breaks=c(2010:2017),
+        breaks=c(2010,2013,2017),
+        labels=c("2010","2013","2017")
+    ) + 
+    labs(
+        fill="Household primary domestic water source",
+        caption=" \n "
+    ) + 
     ## labs(caption="\u2A Improved non-drinking water source\n\u2020 Unimproved non-drinking water source") + 
     theme(
-        legend.title=element_blank(),
+        legend.title=element_text(size=6, face="italic"),
+        ## legend.title=element_blank(),
         legend.position="bottom",
         legend.text=element_text(size=6),
         axis.text=element_text(size=6),
@@ -497,11 +674,11 @@ p = ds_combined %>%
         legend.key=element_rect(fill="white"),
         plot.caption=element_text(size=6)
     ) +
-    guides(fill=guide_legend(ncol=2))
+    guides(fill=guide_legend(title.position="top", ncol=2))
 p
 
 cairo_pdf(
-    file.path(outdir, "figure5.pdf"),
+    file.path(outdir, "Fig3.pdf"),
     width=5, height=5
 )
 print(p)
@@ -735,7 +912,7 @@ df_p_urban =
         urban_piped_p=piped_p
     )
 
-df_p =
+df_p1 =
     df_p_rural %>%
     left_join(df_p_urban) %>%
     left_join(hh_factors) %>%
@@ -745,14 +922,13 @@ df_p =
     filter(!KEY %in% c("HH_HEAD_GENDER_1","HH_GEO_1")) %>% 
     unite(CATEGORY, CATEGORY, DESCRIPTION, sep=": ")
 
-df_p$CATEGORY[df_p$KEY == "HH_COMPUTER_1"] = "Technology: Has computer"
-df_p$CATEGORY[df_p$KEY == "HH_COMPUTER_2"] = "Technology: Does not have computer"
-df_p$CATEGORY[df_p$KEY == "HH_MOBILE_1"] = "Technology: Has mobile phone"
-df_p$CATEGORY[df_p$KEY == "HH_MOBILE_2"] = "Technology: Does not have mobile phone"
+df_p1$CATEGORY[df_p1$KEY == "HH_COMPUTER_1"] = "Technology: Has computer"
+df_p1$CATEGORY[df_p1$KEY == "HH_COMPUTER_2"] = "Technology: Does not have computer"
+df_p1$CATEGORY[df_p1$KEY == "HH_MOBILE_1"] = "Technology: Has mobile phone"
+df_p1$CATEGORY[df_p1$KEY == "HH_MOBILE_2"] = "Technology: Does not have mobile phone"
 
-cats = df_p$CATEGORY
-
-n_obs = nrow(df_p)
+## cats = df_p1$CATEGORY
+## n_obs = nrow(df_p1)
 
 format_p_value = function(p, sig_level) {
     ## Function to format p-value according
@@ -779,60 +955,6 @@ format_r_value = function(r, p, sig_level) {
     }
     r
 }
-
-sink(file.path(outdir, "table4.tex"))
-cat("\\begin{tabular}{l r r r r r r r r}\n")
-cat("\\toprule\n")
-cat("Characteristic & \\multicolumn{4}{c}{Rural} & \\multicolumn{4}{c}{Urban} \\\\\n")
-cat("\\cmidrule(lr){2-5}\n")
-cat("\\cmidrule(lr){6-9}\n")
-cat("& Sachet & p-value & Piped & p-value & Sachet & p-value & Piped & p-value \\\\\n")
-cat("\\midrule\n")
-for (cat in cats) {
-    row_ix = which(df_p$CATEGORY %in% cat)    
-    rural_piped_r =
-        df_p[row_ix, "rural_piped_r", drop=T] %>%
-        as.numeric 
-    rural_piped_p =
-        df_p[row_ix, "rural_piped_p", drop=T] %>%
-        as.numeric
-    rural_piped_r %<>% format_r_value(rural_piped_p, sig_level)
-    rural_piped_p %<>% format_p_value(sig_level)    
-    urban_piped_r =
-        df_p[row_ix, "urban_piped_r", drop=T] %>%
-        as.numeric    
-    urban_piped_p =
-        df_p[row_ix, "urban_piped_p", drop=T] %>%
-        as.numeric
-    urban_piped_r %<>% format_r_value(urban_piped_p, sig_level)
-    urban_piped_p %<>% format_p_value(sig_level)    
-    rural_sachet_r =
-        df_p[row_ix, "rural_sachet_r", drop=T] %>%
-        as.numeric
-    rural_sachet_p =
-        df_p[row_ix, "rural_sachet_p", drop=T] %>%
-        as.numeric
-    rural_sachet_r %<>% format_r_value(rural_sachet_p, sig_level)
-    rural_sachet_p %<>% format_p_value(sig_level)    
-    urban_sachet_r =
-        df_p[row_ix, "urban_sachet_r", drop=T] %>%
-        as.numeric
-    urban_sachet_p =
-        df_p[row_ix, "urban_sachet_p", drop=T] %>%
-        as.numeric
-    urban_sachet_r %<>% format_r_value(urban_sachet_p, sig_level)
-    urban_sachet_p %<>% format_p_value(sig_level)    
-    cat(
-        cat, " & ",
-        rural_sachet_r, " & ", rural_sachet_p, " & ",
-        rural_piped_r, " & ", rural_piped_p, " & ",
-        urban_sachet_r, " & ", urban_sachet_p, " & ",
-        urban_piped_r, " & ", urban_piped_p, " \\\\\n"
-    )
-}
-cat("\\bottomrule\n")
-cat("\\end{tabular}\n")
-sink()
 
 ## Table - Correlation between SHDI and the consumption rate of
 ## different types of drinking water for different regions:
@@ -912,12 +1034,12 @@ df_p_urban =
         urban_piped_p=piped_p
     )
 
-df_p =
+df_p2 =
     df_p_ghana %>%
     left_join(df_p_rural) %>%
     left_join(df_p_urban) 
 
-df_p %<>%
+df_p2 %<>%
     mutate(
         CATEGORY=c(
             "Subnational HDI", "Gross National Income",
@@ -925,16 +1047,12 @@ df_p %<>%
         )
     )
 
-## Use in the following section:
-row_ix = which(df_p$CATEGORY %in% "Subnational HDI")
-ghana_sachet_r = df_p$ghana_sachet_r[row_ix]
-ghana_sachet_p = df_p$ghana_sachet_p[row_ix]
-ghana_piped_r = df_p$ghana_piped_r[row_ix]
-ghana_piped_p = df_p$ghana_piped_p[row_ix]
 
-cats = df_p$CATEGORY
+## First make table with df_p1
+cats = df_p1$CATEGORY
+n_obs = nrow(df_p1)
 
-sink(file.path(outdir, "table5.tex"))
+sink(file.path(outdir, "table4.tex"))
 cat("\\begin{tabular}{l r r r r r r r r}\n")
 cat("\\toprule\n")
 cat("Characteristic & \\multicolumn{4}{c}{Rural} & \\multicolumn{4}{c}{Urban} \\\\\n")
@@ -943,50 +1061,163 @@ cat("\\cmidrule(lr){6-9}\n")
 cat("& Sachet & p-value & Piped & p-value & Sachet & p-value & Piped & p-value \\\\\n")
 cat("\\midrule\n")
 for (cat in cats) {
-    row_ix = which(df_p$CATEGORY %in% cat)    
+    row_ix = which(df_p1$CATEGORY %in% cat)    
     rural_piped_r =
-        df_p[row_ix, "rural_piped_r", drop=T] %>%
+        df_p1[row_ix, "rural_piped_r", drop=T] %>%
         as.numeric 
     rural_piped_p =
-        df_p[row_ix, "rural_piped_p", drop=T] %>%
+        df_p1[row_ix, "rural_piped_p", drop=T] %>%
         as.numeric
-    rural_piped_r %<>% format_r_value(rural_piped_p, sig_level)
-    rural_piped_p %<>% format_p_value(sig_level)    
     urban_piped_r =
-        df_p[row_ix, "urban_piped_r", drop=T] %>%
+        df_p1[row_ix, "urban_piped_r", drop=T] %>%
         as.numeric    
     urban_piped_p =
-        df_p[row_ix, "urban_piped_p", drop=T] %>%
+        df_p1[row_ix, "urban_piped_p", drop=T] %>%
         as.numeric
-    urban_piped_r %<>% format_r_value(urban_piped_p, sig_level)
-    urban_piped_p %<>% format_p_value(sig_level)    
     rural_sachet_r =
-        df_p[row_ix, "rural_sachet_r", drop=T] %>%
+        df_p1[row_ix, "rural_sachet_r", drop=T] %>%
         as.numeric
     rural_sachet_p =
-        df_p[row_ix, "rural_sachet_p", drop=T] %>%
+        df_p1[row_ix, "rural_sachet_p", drop=T] %>%
         as.numeric
-    rural_sachet_r %<>% format_r_value(rural_sachet_p, sig_level)
-    rural_sachet_p %<>% format_p_value(sig_level)    
     urban_sachet_r =
-        df_p[row_ix, "urban_sachet_r", drop=T] %>%
+        df_p1[row_ix, "urban_sachet_r", drop=T] %>%
         as.numeric
     urban_sachet_p =
-        df_p[row_ix, "urban_sachet_p", drop=T] %>%
+        df_p1[row_ix, "urban_sachet_p", drop=T] %>%
         as.numeric
-    urban_sachet_r %<>% format_r_value(urban_sachet_p, sig_level)
-    urban_sachet_p %<>% format_p_value(sig_level)    
-    cat(
-        cat, " & ",
-        rural_sachet_r, " & ", rural_sachet_p, " & ",
-        rural_piped_r, " & ", rural_piped_p, " & ",
-        urban_sachet_r, " & ", urban_sachet_p, " & ",
-        urban_piped_r, " & ", urban_piped_p, " \\\\\n"
-    )
+
+    if (rural_piped_p <= sig_level | urban_piped_p <= sig_level | rural_sachet_p <= sig_level | urban_sachet_p <= sig_level) {
+        rural_piped_r %<>% format_r_value(rural_piped_p, sig_level)
+        rural_piped_p %<>% format_p_value(sig_level)    
+        urban_piped_r %<>% format_r_value(urban_piped_p, sig_level)
+        urban_piped_p %<>% format_p_value(sig_level)    
+        rural_sachet_r %<>% format_r_value(rural_sachet_p, sig_level)
+        rural_sachet_p %<>% format_p_value(sig_level)    
+        urban_sachet_r %<>% format_r_value(urban_sachet_p, sig_level)
+        urban_sachet_p %<>% format_p_value(sig_level)
+        
+        cat(
+            cat, " & ",
+            rural_sachet_r, " & ", rural_sachet_p, " & ",
+            rural_piped_r, " & ", rural_piped_p, " & ",
+            urban_sachet_r, " & ", urban_sachet_p, " & ",
+            urban_piped_r, " & ", urban_piped_p, " \\\\\n"
+        )
+    }    
+}
+
+## Use in the following section:
+row_ix = which(df_p2$CATEGORY %in% "Subnational HDI")
+ghana_sachet_r = df_p2$ghana_sachet_r[row_ix]
+ghana_sachet_p = df_p2$ghana_sachet_p[row_ix]
+ghana_piped_r = df_p2$ghana_piped_r[row_ix]
+ghana_piped_p = df_p2$ghana_piped_p[row_ix]
+
+cats = df_p2$CATEGORY
+## cat("\\midrule\n")
+for (cat in cats) {
+    row_ix = which(df_p2$CATEGORY %in% cat)    
+    rural_piped_r =
+        df_p2[row_ix, "rural_piped_r", drop=T] %>%
+        as.numeric 
+    rural_piped_p =
+        df_p2[row_ix, "rural_piped_p", drop=T] %>%
+        as.numeric
+    urban_piped_r =
+        df_p2[row_ix, "urban_piped_r", drop=T] %>%
+        as.numeric    
+    urban_piped_p =
+        df_p2[row_ix, "urban_piped_p", drop=T] %>%
+        as.numeric
+    rural_sachet_r =
+        df_p2[row_ix, "rural_sachet_r", drop=T] %>%
+        as.numeric
+    rural_sachet_p =
+        df_p2[row_ix, "rural_sachet_p", drop=T] %>%
+        as.numeric
+    urban_sachet_r =
+        df_p2[row_ix, "urban_sachet_r", drop=T] %>%
+        as.numeric
+    urban_sachet_p =
+        df_p2[row_ix, "urban_sachet_p", drop=T] %>%
+        as.numeric
+
+    if (rural_piped_p <= sig_level | urban_piped_p <= sig_level | rural_sachet_p <= sig_level | urban_sachet_p <= sig_level) {
+        rural_piped_r %<>% format_r_value(rural_piped_p, sig_level)
+        rural_piped_p %<>% format_p_value(sig_level)    
+        urban_piped_r %<>% format_r_value(urban_piped_p, sig_level)
+        urban_piped_p %<>% format_p_value(sig_level)    
+        rural_sachet_r %<>% format_r_value(rural_sachet_p, sig_level)
+        rural_sachet_p %<>% format_p_value(sig_level)    
+        urban_sachet_r %<>% format_r_value(urban_sachet_p, sig_level)
+        urban_sachet_p %<>% format_p_value(sig_level)        
+        cat(
+            cat, " & ",
+            rural_sachet_r, " & ", rural_sachet_p, " & ",
+            rural_piped_r, " & ", rural_piped_p, " & ",
+            urban_sachet_r, " & ", urban_sachet_p, " & ",
+            urban_piped_r, " & ", urban_piped_p, " \\\\\n"
+        )
+    }        
 }
 cat("\\bottomrule\n")
 cat("\\end{tabular}\n")
 sink()
+
+## sink(file.path(outdir, "table5.tex"))
+## cat("\\begin{tabular}{l r r r r r r r r}\n")
+## cat("\\toprule\n")
+## cat("Characteristic & \\multicolumn{4}{c}{Rural} & \\multicolumn{4}{c}{Urban} \\\\\n")
+## cat("\\cmidrule(lr){2-5}\n")
+## cat("\\cmidrule(lr){6-9}\n")
+## cat("& Sachet & p-value & Piped & p-value & Sachet & p-value & Piped & p-value \\\\\n")
+## cat("\\midrule\n")
+## for (cat in cats) {
+##     row_ix = which(df_p2$CATEGORY %in% cat)    
+##     rural_piped_r =
+##         df_p2[row_ix, "rural_piped_r", drop=T] %>%
+##         as.numeric 
+##     rural_piped_p =
+##         df_p2[row_ix, "rural_piped_p", drop=T] %>%
+##         as.numeric
+##     rural_piped_r %<>% format_r_value(rural_piped_p, sig_level)
+##     rural_piped_p %<>% format_p_value(sig_level)    
+##     urban_piped_r =
+##         df_p2[row_ix, "urban_piped_r", drop=T] %>%
+##         as.numeric    
+##     urban_piped_p =
+##         df_p2[row_ix, "urban_piped_p", drop=T] %>%
+##         as.numeric
+##     urban_piped_r %<>% format_r_value(urban_piped_p, sig_level)
+##     urban_piped_p %<>% format_p_value(sig_level)    
+##     rural_sachet_r =
+##         df_p2[row_ix, "rural_sachet_r", drop=T] %>%
+##         as.numeric
+##     rural_sachet_p =
+##         df_p2[row_ix, "rural_sachet_p", drop=T] %>%
+##         as.numeric
+##     rural_sachet_r %<>% format_r_value(rural_sachet_p, sig_level)
+##     rural_sachet_p %<>% format_p_value(sig_level)    
+##     urban_sachet_r =
+##         df_p2[row_ix, "urban_sachet_r", drop=T] %>%
+##         as.numeric
+##     urban_sachet_p =
+##         df_p2[row_ix, "urban_sachet_p", drop=T] %>%
+##         as.numeric
+##     urban_sachet_r %<>% format_r_value(urban_sachet_p, sig_level)
+##     urban_sachet_p %<>% format_p_value(sig_level)    
+##     cat(
+##         cat, " & ",
+##         rural_sachet_r, " & ", rural_sachet_p, " & ",
+##         rural_piped_r, " & ", rural_piped_p, " & ",
+##         urban_sachet_r, " & ", urban_sachet_p, " & ",
+##         urban_piped_r, " & ", urban_piped_p, " \\\\\n"
+##     )
+## }
+## cat("\\bottomrule\n")
+## cat("\\end{tabular}\n")
+## sink()
 
 ## Table - Usage of sachet water among households of different characteristcs.
 vars = c(
@@ -1080,7 +1311,7 @@ summary_tbl =
 
 cats = unique(hh_factors$CATEGORY) %>% `[`(!. %in% "Urban or rural")
 
-sink(file.path(outdir, "table6.tex"))
+sink(file.path(outdir, "table5.tex"))
 cat("\\begin{tabular}{l r r r r r r r r r}\n")
 cat("\\toprule\n")
 cat("Characteristic & \\multicolumn{3}{c}{Rural} & \\multicolumn{3}{c}{Urban (excl. Accra)} & \\multicolumn{3}{c}{Urban (Accra only)} \\\\\n")
@@ -1190,7 +1421,7 @@ rgns = c(
 )
 
 ## Write tex table
-sink(file.path(outdir, "table7.tex"))
+sink(file.path(outdir, "table6.tex"))
 cat("\\begin{tabular}{l r r r r r r }\n")
 cat("\\toprule\n")
 cat("Region & \\multicolumn{3}{c}{Rural} & \\multicolumn{3}{c}{Urban} \\\\\n")
@@ -1406,7 +1637,11 @@ cats = summary_tbl$CATEGORY
 ## ####################################################### ##
 ## ####################################################### ##
 
+sf::sf_use_s2(FALSE)
+
 ## Construct a lookup table to map 216 districts to 170 districts
+
+## https://stackoverflow.com/a/68481205
 join = st_join(st_centroid(distGeo216[,'ID']), distGeo170[,'ID'])
 lut = join %>% as_tibble %>% dplyr::select(ID.x,ID.y)
 
@@ -1417,10 +1652,10 @@ lut$ID.y[lut$ID.x %in% 720] = 720
 dist216to170 = lut %>% rename(REGDIST=ID.x) %>% rename(REGDIST170=ID.y)
 
 ## Identify major cities in Ghana
-ghanaCities =
-    distGeo216 %>%
-    filter(ID %in% c(614,811,304,105)) %>%
-    mutate(NAME=c("Sekondi-Takoradi", "Accra", "Kumasi", "Tamale"))
+## ghanaCities =
+##     distGeo216 %>%
+##     filter(ID %in% c(614,811,304,105)) %>%
+##     mutate(NAME=c("Sekondi-Takoradi", "Accra", "Kumasi", "Tamale"))
 
 HDI_region = readRDS("data/HDI_ghana_region.rds")
 HDI_region %<>%     
@@ -1818,26 +2053,31 @@ ghana_boundary =
 ##     layer="geo2_gh2010"
 ## ) %>% st_transform(crs=32630) %>% mutate(ID=as.numeric(DIST2010))
 ## distGeo170[["AREA_KM"]] = st_area(distGeo170) / 1000 / 1000
-ghana_cities =
-    do.call(rbind, st_geometry(ghanaCities %<>% st_centroid)) %>%
-    as_tibble %>%
-    setNames(c("lon","lat")) %>%
-    mutate(NAME=ghanaCities$NAME)
+## ghana_cities =
+##     do.call(rbind, st_geometry(ghanaCities %<>% st_centroid)) %>%
+##     as_tibble %>%
+##     setNames(c("lon","lat")) %>%
+##     mutate(NAME=ghanaCities$NAME)
 
 GeomSf$draw_key = draw_key_polygon3
 
 p = ggplot(data=tmp) +
     geom_sf(data=world, fill="grey", color=NA) +
-    geom_sf(aes(fill=SID), size=0.05, color='black') +
+    ## geom_sf(aes(fill=SID), size=0.05, color='black') +
+    geom_sf(aes(fill=SID), size=0.05, color=NA) +    
+    geom_sf(data=adm2_2021, fill=NA, size=0.025, color='black') + #CHECK
     scale_fill_brewer(palette="Set3") +
-    ## geom_sf(data=rgns, fill=NA, size=0.3, color='black') +
-    geom_sf(data=st_centroid(ghanaCities), size=1) +
+    geom_sf(data=ghana_cities, size=1, shape=0) +    
     facet_wrap(~VAR, nrow=1) +
     coord_sf(xlim=c(xmin, xmax), ylim=c(ymin, ymax), expand=TRUE) +
     xlab("") +
     ylab("") +
+    labs(
+        fill="Household primary drinking water source"
+    ) + 
     theme(
-        legend.title=element_blank(),
+        legend.title=element_text(size=6, face="italic"),
+        ## legend.title=element_blank(),
         legend.position="bottom",
         legend.text=element_text(size=6),
         axis.text=element_text(size=6),
@@ -1847,23 +2087,23 @@ p = ggplot(data=tmp) +
         legend.key=element_rect(fill="white"),
         plot.caption=element_text(size=6)
     ) +
-    guides(fill=guide_legend(ncol=2))
+    guides(fill=guide_legend(title.position="top", ncol=2))
 
 lut = data.frame(SID=labs, CODE=1:7)
 total_2010 = tmp %>% as_tibble %>% dplyr::select(VAR, SID, -geometry) %>% left_join(lut) %>% filter(VAR %in% 2010) %>% mutate(SACHET=(CODE == 3)) %>% summarise(SACHET_TOTAL=sum(SACHET))
 cairo_pdf(
-    file.path(outdir, "figure6.pdf"),
+    file.path(outdir, "Fig4.pdf"),
     width=5, height=4
 )
 print(p)
 dev.off()
 
 ## Map of study region
-ghana_cities = st_centroid(ghanaCities)
-coords = st_coordinates(ghana_cities)
-ghana_cities = cbind(ghana_cities, coords)
-ghana_cities$nudge_y = c(-0.15, -0.15, -0.15, -0.15)
-ghana_cities$nudge_x = c(0.65, 0.25, 0.3, 0.25)
+## ghana_cities = st_centroid(ghanaCities)
+## coords = st_coordinates(ghana_cities)
+## ghana_cities = cbind(ghana_cities, coords)
+## ghana_cities$nudge_y = c(-0.15, -0.15, -0.15, -0.15)
+## ghana_cities$nudge_x = c(0.65, 0.25, 0.3, 0.25)
 
 ## ghana_rgns =
 ##     st_read(dsn="data-raw/Regions_10", layer="Map_of_Regions_in_Ghana") %>%
@@ -1882,28 +2122,42 @@ library(ggrepel)
 ## ghana_rgns_gaul =
 ##     st_read(dsn="data-raw", layer="GHA_admbndp1_1m_GAUL") %>% 
 ##     cbind(st_coordinates(st_centroid(.)))
-ghana_rgns_gaul$nudge_y = c(-0.18, 0, 0, 0, 0.2, 0.7, 0.2, 0.5, 0, 0)
-ghana_rgns_gaul$nudge_x = c(0.6, 0, 0, 0, 0, -0.1, 0, 0, 0, 0)
+## ghana_rgns_gaul$nudge_y = c(-0.18, 0, 0, 0, 0.2, 0.7, 0.2, 0.5, 0, 0)
+## ghana_rgns_gaul$nudge_x = c(0.6, 0, 0, 0, 0, -0.1, 0, 0, 0, 0)
+
+adm1_2010 %<>% cbind(st_coordinates(st_centroid(.)))
+adm1_2010$nudge_y = c(0.20, 0.20, 0, 0, -0.18, 0.25, 0.1, 0, 0.70, 0)
+adm1_2010$nudge_x = c(0, 0, 0, 0, 0.6, 0, 0.75, 0, -0.1, 0)
+
+ghana_cities$nudge_y = c(-0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -0.1)
+ghana_cities$nudge_x = c(0.25, -0.25, 0.35, -0.3, 0.2, 0.25, -0.35, 0.15, 0.15, 0.5)
 
 p = ggplot() +
     geom_sf(data=world, fill="grey", color=NA) +
-    ## geom_sf(data=ghana_dists, size=0.1, color='white') +
-    geom_sf(data=distGeo216, size=0.1, color='white') + #CHECK
-    ## geom_sf(data=distGeo170, size=0.025, color='black') +    
-    geom_sf(data=ghana_rgns_gaul, fill=NA, size=0.4, color='black') + 
-    geom_sf(data=ghana_cities, size=1) +
+    ## ## geom_sf(data=ghana_dists, size=0.1, color='white') +
+    ## geom_sf(data=distGeo216, size=0.1, color='white') + #CHECK
+    geom_sf(data=adm1_2010, size=0.2, color=NA) + 
+    ## geom_sf(data=distGeo170, fill=NA, size=0.025, color='white') +    
+    ## geom_sf(data=adm2_2021, size=0.1, color='white') + #CHECK
+    ## geom_sf(data=ghana_rgns_gaul, fill=NA, size=0.4, color='black') + 
+    geom_sf(data=adm1_2010, fill=NA, size=0.2, color='black') + 
+    ## geom_sf(data=adm1_2021, fill=NA, size=0.1, color='black') + 
+    geom_sf(data=ghana_cities, size=1, shape=0) +
     geom_text(
-        data=ghana_rgns_gaul,
+        data=adm1_2010,
         mapping=aes(X, Y, label=ADM1_NAME),
+        ## data=ghana_rgns_gaul,
+        ## mapping=aes(X, Y, label=ADM1_NAME),
         size=2,
         fontface="bold",
-        nudge_x=ghana_rgns_gaul$nudge_x,
-        nudge_y=ghana_rgns_gaul$nudge_y
+        nudge_x=adm1_2010$nudge_x,
+        nudge_y=adm1_2010$nudge_y
     )  +
     geom_text(
         data=ghana_cities,
-        mapping=aes(X, Y, label=NAME),
-        size=2,
+        mapping=aes(X, Y, label=capital),
+        size=1.5,
+        ## hjust="left",
         nudge_x=ghana_cities$nudge_x,
         nudge_y=ghana_cities$nudge_y,
         fontface="italic"
@@ -1918,7 +2172,7 @@ p = ggplot() +
     )
 
 cairo_pdf(
-    file.path(outdir, "figure1.pdf"),
+    file.path(outdir, "Fig1.pdf"),
     width=4, height=4
 )
 print(p)
@@ -1943,12 +2197,13 @@ tmp$VAR %<>% factor(levels=c("sachet_usage_2010", "sachet_usage_2013", "sachet_u
 
 library(RColorBrewer)
 pal = colorRampPalette(brewer.pal(9, "PuBu"))
-
 p = ggplot(data=tmp) +
     geom_sf(data=world, fill="grey", color=NA) +
-    geom_sf(data=tmp, aes(fill=SID), size=0.1, color='black') +
+    ## geom_sf(data=tmp, aes(fill=SID), size=0.05, color='black') +
+    geom_sf(data=tmp, aes(fill=SID), size=0.1, color=NA) +
+    geom_sf(data=adm2_2021, fill=NA, size=0.025, color='black') + #CHECK
     scale_fill_distiller(palette="YlGnBu", direction=1) +
-    geom_sf(data=st_centroid(ghanaCities), size=1) +
+    geom_sf(data=ghana_cities, size=1, shape=0) +    
     facet_wrap(~VAR, nrow=1) +
     coord_sf(xlim=c(xmin, xmax), ylim=c(ymin, ymax), expand=TRUE) +
     xlab("") +
@@ -1978,7 +2233,7 @@ p = ggplot(data=tmp) +
     )
 
 cairo_pdf(
-    file.path(outdir, "figure7.pdf"),
+    file.path(outdir, "Fig5.pdf"),
     width=5, height=4
 )
 print(p)
@@ -2016,90 +2271,230 @@ pct$VAR %<>%
 library(RColorBrewer)
 pal = colorRampPalette(brewer.pal(9, "PuBu"))
 
-p = ggplot(data=pct) +
+## ***Removed at suggestion of reviewer***
+
+## p = ggplot(data=pct) +
+##     geom_sf(data=world, fill="grey", color=NA) +
+##     geom_sf(data=pct, aes(fill=SID), size=0.1, color='black') +
+##     geom_sf(data=common, fill=NA, size=0.5, color='black') + 
+##     scale_fill_distiller(palette="YlGnBu", direction=1) +
+##     geom_sf(data=st_centroid(ghanaCities), size=1) +
+##     facet_wrap(~VAR, nrow=3, ncol=1) +
+##     coord_sf(xlim=c(xmin, xmax), ylim=c(ymin, 7.5), expand=TRUE) +
+##     xlab("") +
+##     ylab("") +
+##     theme(
+##         legend.position="bottom",
+##         legend.text=element_text(size=6),
+##         axis.text=element_text(size=6),
+##         axis.title=element_text(size=8),
+##         legend.key.height=unit(0.3,"cm"),
+##         strip.text=element_text(size=8, margin=margin(t=3, b=2)),
+##         legend.key.width=unit(2, "cm"),
+##         legend.key=element_rect(fill="white"),
+##         plot.caption=element_text(size=6)
+##     ) +
+##     guides( # https://ggplot2.tidyverse.org/reference/guide_colourbar.html
+##         fill=guide_colorbar(
+##             title="Fraction of households reporting sachet water as primary source",
+##             title.theme=element_text(size=6),
+##             title.position="top",
+##             title.hjust=0,
+##             frame.colour="black",
+##             frame.linewidth=0.5,
+##             ticks=FALSE,
+##             nbin=30
+##         )
+##     )
+
+## cairo_pdf(
+##     file.path(outdir, "Fig8.pdf"),
+##     width=5, height=8
+## )
+## print(p)
+## dev.off()
+
+## Spatial autocorrelation analysis
+neighbours = poly2nb(distGeo170, queen=FALSE)
+listw = nb2listw(neighbours)
+globalMoran2010 = moran.test(distGeo170$sachet_usage_2010, listw)
+globalMoran2013 = moran.test(distGeo170$sachet_usage_2013, listw)
+globalMoran2017 = moran.test(distGeo170$sachet_usage_2017, listw, zero.policy=TRUE, na.action=na.exclude)
+
+globalMoran_I = c(globalMoran2010$estimate[["Moran I statistic"]], globalMoran2013$estimate[["Moran I statistic"]], globalMoran2017$estimate[["Moran I statistic"]])
+globalMoran_p = c(globalMoran2010$p.value, globalMoran2013$p.value, globalMoran2017$p.value)
+globalMoran_z_norm = c(globalMoran2010$statistic, globalMoran2013$statistic, globalMoran2017$statistic)
+
+moran_I = data.frame(
+    Year=c(2010, 2013, 2017),
+    I=globalMoran_I,
+    p_sim=globalMoran_p,
+    z_norm=globalMoran_z_norm
+)
+
+## Write tex table
+sink(file.path(outdir, "table2.tex"))
+cat("\\begin{tabular}{l r r r}\n")
+cat("\\toprule\n")
+cat("Year & Moran's I & p-value & z-score \\\\\n")
+cat("\\midrule\n")
+for (year in c(2010, 2013, 2017)) {
+    row_ix = which(moran_I$Year %in% year)
+    I = moran_I[row_ix, "I", drop=TRUE] %>%
+        as.numeric %>%
+        formatC(digits=2, format="f")
+    p = moran_I[row_ix, "p_sim", drop=TRUE] %>% as.numeric
+    if (p <= 0.001) {
+        I_p_sim = "\\textless{}0.001"
+    } else {
+        I_p_sim = p %>% formatC(digits=3, format="f")
+    }    
+    I_z_norm =
+        moran_I[row_ix, "z_norm", drop=TRUE] %>%
+        as.numeric %>%
+        formatC(digits=2, format="f")        
+    cat(year, " & ", I, " & ", I_p_sim, " & ", I_z_norm, "\\\\\n")
+}
+cat("\\bottomrule\n")
+cat("\\end{tabular}\n")
+sink()
+
+moran = moran.plot(distGeo170$sachet_usage_2013, listw=nb2listw(neighbours, style="W"))
+localMoran2010 = localmoran(distGeo170$sachet_usage_2010, listw=nb2listw(neighbours, style="W"))
+localMoran2013 = localmoran(distGeo170$sachet_usage_2013, listw=nb2listw(neighbours, style="W"))
+localMoran2017 = localmoran(distGeo170$sachet_usage_2017, listw=nb2listw(neighbours, style="W"), zero.policy=TRUE, na.action=na.exclude)
+
+## moran_map = cbind(distGeo170, localMoran2010)
+lisa_cluster_fun = function(local, var, sf) {    
+    quadrant <- vector(mode="numeric",length=nrow(local))
+    ## centers the variable of interest around its mean
+    m <- distGeo170[[var]] - mean(distGeo170[[var]], na.rm=T)    
+    ## centers the local Moran's around the mean
+    m_local <- local[,1] - mean(local[,1], na.rm=T)
+    ## significance threshold
+    ## signif <- 0.05
+    ## builds a data quadrant
+    quadrant[m >0 & m_local>0] <- 4  
+    quadrant[m <0 & m_local<0] <- 1      
+    quadrant[m <0 & m_local>0] <- 2
+    quadrant[m >0 & m_local<0] <- 3
+    quadrant[local[,5] > sf] <- 0
+    quadrant
+}
+
+sf = sig_level
+distGeo170$lisa_2010 = lisa_cluster_fun(localMoran2010, "sachet_usage_2010", sf)
+distGeo170$lisa_2013 = lisa_cluster_fun(localMoran2013, "sachet_usage_2013", sf)
+distGeo170$lisa_2017 = lisa_cluster_fun(localMoran2017, "sachet_usage_2017", sf)
+
+tmp =
+    distGeo170 %>%
+    dplyr::select(lisa_2010, lisa_2013, lisa_2017, geometry) %>%
+    gather(VAR, SID, -geometry)
+
+## 0 : Not significant
+## 1 : "low-low"
+## 2 : "low-high"
+## 3 : "high-low"
+## 4 : "high-high"
+
+## As elsewhere, remove insignificant values
+tmp$SID[tmp$SID==0]=NA
+
+tmp$SID %<>%
+    factor(
+        levels=c(0,1,2,3,4),
+        labels=c(
+            "Not significant",
+            "Low-Low (Low value in neighbourhood of low values)",
+            "Low-High (low value in neighbourhood of high values)",
+            "High-Low (high value in neighbourhood of low values)",
+            "High-High (high value in neighbourhood of high values)"
+        )
+    )
+
+tmp$VAR %<>%
+    factor(
+        levels=c("lisa_2010", "lisa_2013", "lisa_2017"),
+        labels=c("2010","2013","2017")
+    )
+
+p = ggplot(data=tmp) +
     geom_sf(data=world, fill="grey", color=NA) +
-    geom_sf(data=pct, aes(fill=SID), size=0.1, color='black') +
-    geom_sf(data=common, fill=NA, size=0.5, color='black') + 
-    scale_fill_distiller(palette="YlGnBu", direction=1) +
-    geom_sf(data=st_centroid(ghanaCities), size=1) +
-    facet_wrap(~VAR, nrow=3, ncol=1) +
-    coord_sf(xlim=c(xmin, xmax), ylim=c(ymin, 7.5), expand=TRUE) +
+    geom_sf(data=tmp, color=NA) + 
+    ## geom_sf(aes(fill=SID), size=0.05, color='black') +
+    geom_sf(aes(fill=SID), size=0.05, color=NA) +
+    geom_sf(data=adm2_2021, fill=NA, size=0.025, color='black') + #CHECK
+    scale_fill_brewer(palette="Set1", na.translate=FALSE) +
+    ## geom_sf(data=st_centroid(ghanaCities), size=1) +
+    geom_sf(data=ghana_cities, size=1, shape=0) +    
+    facet_wrap(~VAR, nrow=1) +
+    coord_sf(xlim=c(xmin, xmax), ylim=c(ymin, ymax), expand=TRUE) +
     xlab("") +
     ylab("") +
     theme(
+        legend.title=element_blank(),
         legend.position="bottom",
         legend.text=element_text(size=6),
         axis.text=element_text(size=6),
         axis.title=element_text(size=8),
-        legend.key.height=unit(0.3,"cm"),
+        legend.key.size=unit(0.3,"cm"),
         strip.text=element_text(size=8, margin=margin(t=3, b=2)),
-        legend.key.width=unit(2, "cm"),
         legend.key=element_rect(fill="white"),
         plot.caption=element_text(size=6)
     ) +
-    guides( # https://ggplot2.tidyverse.org/reference/guide_colourbar.html
-        fill=guide_colorbar(
-            title="Fraction of households reporting sachet water as primary source",
-            title.theme=element_text(size=6),
-            title.position="top",
-            title.hjust=0,
-            frame.colour="black",
-            frame.linewidth=0.5,
-            ticks=FALSE,
-            nbin=30
-        )
-    )
+    guides(fill=guide_legend(ncol=1))
 
 cairo_pdf(
-    file.path(outdir, "figure8.pdf"),
-    width=5, height=8
+    file.path(outdir, "Fig6.pdf"),
+    width=5, height=4
 )
 print(p)
 dev.off()
 
-## Spatial autocorrelation analysis (in Python, but plotting done here)
+## ## Spatial autocorrelation analysis (in Python, but plotting done here)
 
-## Write distGeo170 data to file, and run Python script to compute
-## spatial autocorrelation
-x = distGeo170 %>%
-    as.data.frame %>%
-    as_tibble %>%
-    mutate(dist=ID) %>% 
-    dplyr::select(dist, starts_with('sachet_usage'), starts_with('HH_DENSITY')) %>%
-    mutate(sachet_usage_2017=replace_na(sachet_usage_2017, 0))
-write.csv(x, "data/data_fromR.csv", row.names=FALSE)
+## ## Write distGeo170 data to file, and run Python script to compute
+## ## spatial autocorrelation
+## x = distGeo170 %>%
+##     as.data.frame %>%
+##     as_tibble %>%
+##     mutate(dist=ID) %>% 
+##     dplyr::select(dist, starts_with('sachet_usage'), starts_with('HH_DENSITY')) %>%
+##     mutate(sachet_usage_2017=replace_na(sachet_usage_2017, 0))
+## write.csv(x, "data/data_fromR.csv", row.names=FALSE)
 
-## NB Tried using reticulate package, but this causes R to fail with segmentation fault
-## NB This will only work on Linux machines, but it is probably straightforward to
-## adapt to Windows or Mac
-system("bash run-autocorr-analysis.sh")
+## ## NB Tried using reticulate package, but this causes R to fail with segmentation fault
+## ## NB This will only work on Linux machines, but it is probably straightforward to
+## ## adapt to Windows or Mac
+## system("bash run-autocorr-analysis.sh")
 
-distGeo170_lisa = st_read(
-    dsn="data/dist_geo_170_updated.gpkg"
-) %>%
-    mutate(ID=as.numeric(dist)) %>%
-    dplyr::select('ID', starts_with('p_'), starts_with('q_'))
+## distGeo170_lisa = st_read(
+##     dsn="data/dist_geo_170_updated.gpkg"
+## ) %>%
+##     mutate(ID=as.numeric(dist)) %>%
+##     dplyr::select('ID', starts_with('p_'), starts_with('q_'))
 
-## join two data frames by ID
-dat = inner_join(
-    distGeo170 %>% as.data.frame(),
-    distGeo170_lisa %>% as.data.frame(),
-    by = "ID"
-) ## %>%
-    ## dplyr::select(-geometry.y) %>%
-    ## rename(geometry=geometry.x)
+## ## join two data frames by ID
+## dat = inner_join(
+##     distGeo170 %>% as.data.frame(),
+##     distGeo170_lisa %>% as.data.frame(),
+##     by = "ID"
+## ) ## %>%
+##     ## dplyr::select(-geometry.y) %>%
+##     ## rename(geometry=geometry.x)
 
-distGeo170 = dat %>% st_sf(sf_column_name = 'geometry')
+## distGeo170 = dat %>% st_sf(sf_column_name = 'geometry')
 
-## Do not include LISA analysis
+## ## LISA analysis
 ## distGeo170 =
 ##     distGeo170 %>%
-##     mutate(highh_2010 = ((p_sim_2010<0.20) & (q_2010 == 1)) * 1) %>%
-##     mutate(lowh_2010  = ((p_sim_2010<0.20) & (q_2010 == 3)) * 2) %>%
-##     mutate(highh_2013 = ((p_sim_2013<0.20) & (q_2013 == 1)) * 1) %>%
-##     mutate(lowh_2013  = ((p_sim_2013<0.20) & (q_2013 == 3)) * 2) %>%
-##     mutate(highh_2017 = ((p_sim_2017<0.20) & (q_2017 == 1)) * 1) %>%
-##     mutate(lowh_2017  = ((p_sim_2017<0.20) & (q_2017 == 3)) * 2) %>%
+##     mutate(highh_2010 = ((p_sim_2010<sig_level) & (q_2010 == 1)) * 1) %>%
+##     mutate(lowh_2010  = ((p_sim_2010<sig_level) & (q_2010 == 3)) * 2) %>%
+##     mutate(highh_2013 = ((p_sim_2013<sig_level) & (q_2013 == 1)) * 1) %>%
+##     mutate(lowh_2013  = ((p_sim_2013<sig_level) & (q_2013 == 3)) * 2) %>%
+##     mutate(highh_2017 = ((p_sim_2017<sig_level) & (q_2017 == 1)) * 1) %>%
+##     mutate(lowh_2017  = ((p_sim_2017<sig_level) & (q_2017 == 3)) * 2) %>%
 ##     mutate(lisa_2010 = highh_2010 + lowh_2010) %>%
 ##     mutate(lisa_2010 = na_if(lisa_2010, 0)) %>% 
 ##     mutate(lisa_2013 = highh_2013 + lowh_2013) %>%
@@ -2120,6 +2515,8 @@ distGeo170 = dat %>% st_sf(sf_column_name = 'geometry')
 ## p = ggplot(data=tmp) +
 ##     geom_sf(data=world, fill="grey", color=NA) +
 ##     geom_sf(aes(fill=SID), size=0.05, color='black') +
+##     ## geom_sf(aes(fill=SID), size=0.05, color=NA) +
+##     ## geom_sf(data=adm2_2021, fill=NA, size=0.05, color='black') + #CHECK
 ##     scale_fill_brewer(palette="Set1", na.translate=FALSE) +
 ##     geom_sf(data=st_centroid(ghanaCities), size=1) +
 ##     facet_wrap(~VAR, nrow=1) +
@@ -2140,52 +2537,52 @@ distGeo170 = dat %>% st_sf(sf_column_name = 'geometry')
 ##     guides(fill=guide_legend(ncol=1))
 
 ## cairo_pdf(
-##     file.path(outdir, "lisa_cluster_map.pdf"),
+##     file.path(outdir, "Fig6.pdf"),
 ##     width=5, height=4
 ## )
 ## print(p)
 ## dev.off()
 
-## Tables 2 and 3 (actually combine these)
-moranBV_I =
-    read.csv("data/moranBV_I_data.csv") %>%
-    mutate(var=gsub("sachet_usage_", "", var)) %>%
-    rename(Year=var, BV_I=I, BV_p_sim=p_sim, BV_z_norm=z_norm) %>%
-    arrange(Year)
+## ## Tables 2 and 3 (actually combine these)
+## ## moranBV_I =
+## ##     read.csv("data/moranBV_I_data.csv") %>%
+## ##     mutate(var=gsub("sachet_usage_", "", var)) %>%
+## ##     rename(Year=var, BV_I=I, BV_p_sim=p_sim, BV_z_norm=z_norm) %>%
+## ##     arrange(Year)
 
-moran_I =
-    read.csv("data/moran_I_data.csv") %>%
-    mutate(var=gsub("sachet_usage_", "", var)) %>%
-    rename(Year=var) %>%
-    arrange(Year) %>%
-    left_join(moranBV_I)
+## moran_I =
+##     read.csv("data/moran_I_data.csv") %>%
+##     mutate(var=gsub("sachet_usage_", "", var)) %>%
+##     rename(Year=var) %>%
+##     arrange(Year) %>%
+##     left_join(moranBV_I)
 
-## Write tex table
-sink(file.path(outdir, "table2.tex"))
-cat("\\begin{tabular}{l r r r}\n")
-cat("\\toprule\n")
-cat("Year & Moran's I & p-value & z-score \\\\\n")
-cat("\\midrule\n")
-for (year in c(2010, 2013, 2017)) {
-    row_ix = which(moran_I$Year %in% year)
-    I = moran_I[row_ix, "I", drop=TRUE] %>%
-        as.numeric %>%
-        formatC(digits=2, format="f")
-    p = moran_I[row_ix, "p_sim", drop=TRUE] %>% as.numeric
-    if (p <= 0.001) {
-        I_p_sim = paste0("\\textless{}", moran_I[row_ix, "p_sim", drop=TRUE])
-    } else {
-        I_p_sim = p %>% formatC(digits=3, format="f")
-    }    
-    I_z_norm =
-        moran_I[row_ix, "z_norm", drop=TRUE] %>%
-        as.numeric %>%
-        formatC(digits=2, format="f")        
-    cat(year, " & ", I, " & ", I_p_sim, " & ", I_z_norm, "\\\\\n")
-}
-cat("\\bottomrule\n")
-cat("\\end{tabular}\n")
-sink()
+## ## Write tex table
+## sink(file.path(outdir, "table1.tex"))
+## cat("\\begin{tabular}{l r r r}\n")
+## cat("\\toprule\n")
+## cat("Year & Moran's I & p-value & z-score \\\\\n")
+## cat("\\midrule\n")
+## for (year in c(2010, 2013, 2017)) {
+##     row_ix = which(moran_I$Year %in% year)
+##     I = moran_I[row_ix, "I", drop=TRUE] %>%
+##         as.numeric %>%
+##         formatC(digits=2, format="f")
+##     p = moran_I[row_ix, "p_sim", drop=TRUE] %>% as.numeric
+##     if (p <= 0.001) {
+##         I_p_sim = paste0("\\textless{}", moran_I[row_ix, "p_sim", drop=TRUE])
+##     } else {
+##         I_p_sim = p %>% formatC(digits=3, format="f")
+##     }    
+##     I_z_norm =
+##         moran_I[row_ix, "z_norm", drop=TRUE] %>%
+##         as.numeric %>%
+##         formatC(digits=2, format="f")        
+##     cat(year, " & ", I, " & ", I_p_sim, " & ", I_z_norm, "\\\\\n")
+## }
+## cat("\\bottomrule\n")
+## cat("\\end{tabular}\n")
+## sink()
 
 ## Correlation between regional HDI and use of sachet or piped water as
 ## primary drinking water source
@@ -2262,7 +2659,7 @@ p = ggplot(tmp, aes(x=HDI, y=PCT)) +
 p
 
 cairo_pdf(
-    file.path(outdir, "figure9.pdf"),
+    file.path(outdir, "Fig7.pdf"),
     width=5, height=8
 )
 print(p)
